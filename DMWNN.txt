@@ -1,0 +1,122 @@
+import openpyxl
+import pandas as pd
+from numpy import *
+import numpy as np
+from numpy import hstack
+
+
+def similarity_improve(x, y):
+    b = (0.1 * np.linalg.norm(x * y) + 0.9 * np.linalg.norm(x - y)) / len(x) ** 0.5
+    return b
+
+# 计算相似性矩阵
+def SimilarityMatrix(value):
+    matrix = np.zeros((len(value), len(value)))
+    for i in range(len(value)):
+        for j in range(i, len(value)):
+            if i == j:
+                matrix[i, j] = 1
+                continue
+            matrix[i, j] = similarity_improve(value[i], value[j])
+            matrix[j, i] = matrix[i, j]
+    return matrix
+
+
+# 筛选每行的K个近邻并其记录行数，返回k近邻行数的记录矩阵K
+def sort_nearest_k(A, W, k):
+    K = np.zeros((len(A), k))
+    for i in range(len(W)):
+        for j in range(k):
+            # argsort()把当前数据从小到大排列后返回索引，当num>=0时，np.argsort()[num]就可以理解为y[num];当num<0时，np.argsort()[num]就是把数组y的元素反向输出
+            K[i, j] = int(W[i].argsort()[-j - 1])
+    return K
+
+def wkn(A, W, k):
+    a = np.zeros((len(A), len(A[0])))
+    for i in range(len(A)):
+        for j in range(len(A[0])):
+            a[i, j] = A[i, j]
+    K = sort_nearest_k(A, W, k)
+    # 遍历行
+    for i in range(len(A)):
+        # 遍历每行各元素判断是否空值并更新
+        for j in range(len(A[0])):
+            if A[i, j] == 0:
+                for t in range(len(K[0])):
+                    n = int(K[i, t])
+                    alpha = (k - t) * 2 / (k * (k + 1))
+                    a[i, j] = a[i, j] + A[n, j] * W[i, n] * alpha
+                # a[i, j] = a[i, j] / len(K[0])
+            continue
+    return a
+
+
+# 两矩阵按权重 元素相加融合
+def matrix_comb(A, B, alpha, beta):
+    new_matrix = np.zeros((len(A), len(A[0])))
+    for i in range(len(A)):
+        for j in range(len(A[0])):
+            new_matrix[i, j] = alpha * A[i, j] + beta * B[i, j]
+    return new_matrix
+
+
+# 行、列 knn
+def row_col_knn(Matrix, W1, W2, k1, k2, w1, w2):
+    matrix_knn_row = wkn(Matrix, W1, k1)
+    MT = wkn(Matrix.T, W2, k2)
+    matrix_knn_col = MT.T
+    new_matrix = matrix_comb(matrix_knn_row, matrix_knn_col, w1, w2)
+    return new_matrix
+
+
+def write_excel_xlsx(path, sheet_name, value):
+    index = len(value)
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = sheet_name
+    for i in range(0, index):
+        for j in range(0, len(value[i])):
+            sheet.cell(row=i + 1, column=j + 1, value=str(value[i][j]))
+    workbook.save(path)
+    print("xlsx格式表格写入数据成功！")
+
+
+if __name__ == '__main__':
+
+    print('\n读取数据中...')
+    LD = pd.read_excel('原始LD.xlsx', sheet_name='Sheet1', header=None)
+    MD = pd.read_excel('原始MD.xlsx', sheet_name='Sheet1', header=None)
+    ML = pd.read_excel('原始ML.xlsx', sheet_name='Sheet1', header=None)
+    LD = np.array(LD)
+    MD = np.array(MD)
+    ML = np.array(ML)
+    # ---------------------------
+    knn_row_k = 217
+    knn_col_k = 217
+    comb_w1 = 0.5
+    comb_w2 = 0.5
+
+    print('开始相似性计算...')
+    L_MD = hstack([ML.T, LD])
+    D_ML = hstack([MD.T, LD.T])
+    LL = SimilarityMatrix(L_MD)
+    DD = SimilarityMatrix(D_ML)
+    DD = np.array(DD)
+    LL = np.array(LL)
+    print('计算完毕')
+
+    print('开始knn处理...')
+
+    new_LD = row_col_knn(LD, LL, DD, knn_row_k, knn_col_k, comb_w1, comb_w2)
+    new_LD = row_col_knn(new_LD, LL, DD, knn_row_k, knn_col_k, comb_w1, comb_w2)
+    SUM = 0
+    for i in range(len(new_LD)):
+        for j in range(len(new_LD[0])):
+            if new_LD[i, j] == 0:
+                SUM += 1
+    print('稀疏度=', SUM * 1.0 / (len(new_LD) * len(new_LD[0])))
+
+    write_excel_xlsx('DMWNN预测矩阵.xlsx', 'LD', new_LD)
+
+
+
